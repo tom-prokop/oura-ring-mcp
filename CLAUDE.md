@@ -12,21 +12,30 @@ An MCP (Model Context Protocol) server that exposes Oura Ring health data to LLM
 
 ```
 src/
-├── index.ts           # MCP server entry point (stdio transport)
-├── client.ts          # Oura API client (thin wrapper)
+├── index.ts           # Local entry point (stdio transport, CLI subcommands)
+├── server.ts          # Shared createOuraMcpServer() used by stdio AND the Worker
+├── client.ts          # Oura API client (thin wrapper, runtime-neutral)
 ├── tools/
-│   └── index.ts       # Tool definitions and handlers
+│   ├── index.ts       # Tool definitions and handlers
+│   └── structured.ts  # outputSchema + structuredContent for sleep/readiness/activity/HR
 ├── resources/
 │   └── index.ts       # MCP resources (oura://today, oura://weekly-summary)
 ├── prompts/
 │   └── index.ts       # MCP prompt templates for common analysis tasks
-├── auth/              # Authentication (OAuth CLI + MCP OAuth server)
+├── auth/              # Local (Node) authentication
 │   ├── cli.ts         # `npx oura-ring-mcp auth` command
-│   ├── oauth.ts       # OAuth2 flow helpers (Oura API)
-│   ├── store.ts       # Token storage (~/.oura-mcp/credentials.json)
-│   └── mcp-oauth-provider.ts  # MCP OAuth 2.1 server provider (Phase 4b)
-├── transports/        # Alternative transports
-│   └── http.ts        # HTTP transport with OAuth 2.1 auth (Phase 4b)
+│   ├── oura-oauth.ts  # Runtime-neutral Oura OAuth (authorize URL, code, refresh, revoke) — shared with Worker
+│   ├── oauth.ts       # Node wrapper: env config + persists rotated credentials
+│   ├── token-manager.ts # Single-flight on-demand refresh for the stdio process
+│   └── store.ts       # Token storage (~/.oura-mcp/credentials.json)
+├── worker/            # Cloudflare Worker remote server (see "Remote Deployment")
+│   ├── index.ts       # Entry: OAuthProvider + strips CORS from /mcp
+│   ├── provider.ts    # OAuthProvider config + stateless createMcpHandler
+│   ├── auth-handler.ts# /oauth/authorize (consent) and /oura/callback (allowlist, completeAuthorization)
+│   ├── grant.ts       # Grant props + tokenExchangeCallback (Oura refresh/rotation)
+│   ├── allowlist.ts   # ALLOWED_OURA_USER_ID / ALLOWED_OURA_EMAIL check
+│   ├── html.ts        # Escaped consent/error pages
+│   └── config.ts      # Env type, paths, PUBLIC_BASE_URL handling
 └── utils/
     ├── formatters.ts  # Human-readable formatting (seconds→hours, etc.)
     ├── errors.ts      # Custom error types and user-friendly messages
@@ -36,7 +45,7 @@ scripts/
 └── validate-fixtures.ts  # Compare test fixtures against real Oura API
 ```
 
-## Current Tools (28 available)
+## Current Tools (29 available)
 
 - `get_data_coverage` - Compact cross-endpoint availability check to decide which deeper tools are worth calling
 
@@ -65,6 +74,9 @@ scripts/
 - `get_enhanced_tags` - Rich tags with custom names, types, and time ranges
 - `get_personal_info` - User profile (age, weight, height, biological sex)
 - `get_ring_info` - Ring hardware info (color, firmware, size)
+- `get_ring_battery` - Latest ring battery level or per-day battery for a range (`/ring_battery_level`, spec 1.43)
+
+All tools carry `title` + annotations (`readOnlyHint`, `idempotentHint`, `openWorldHint` true; `destructiveHint` false). `get_sleep`, `get_readiness`, `get_activity`, `get_heart_rate` also declare `outputSchema` and return `structuredContent` (see `src/tools/structured.ts`); the rest return text only.
 
 **Smart Analysis (Phase 3):**
 - `detect_anomalies` - Find unusual readings using IQR + Z-score outlier detection
@@ -129,7 +141,9 @@ Pre-defined templates that guide Claude through common health analysis tasks:
 ## Notes
 
 - When using cURL, load the token in .env
-- Oura PAT tokens deprecated soon → Phase 4a adds OAuth CLI flow
+- Oura stopped issuing personal access tokens in Dec 2025; OAuth is the primary path. `OURA_ACCESS_TOKEN` still works for old PATs.
+- Oura refresh tokens are single-use: always persist the new one (stdio: `refreshAccessToken` saves; Worker: `tokenExchangeCallback` returns `newProps`).
+- MCP SDK is v2 (`@modelcontextprotocol/server` 2.4.0, the exact version `agents` requires). Tests use `@modelcontextprotocol/client`.
 - Data syncs when user opens Oura app - "no data" often means ring hasn't synced
 - Sleep data is attributed to the day you woke up, not when you fell asleep
 - Use Zod for API response validation—define schema once, get types with `z.infer<typeof schema>`
@@ -182,7 +196,15 @@ Pre-defined templates that guide Claude through common health analysis tasks:
 - [x] Deploy OAuth update to Railway and test with Claude.ai connector
   - MCP endpoint at root `/` (Claude.ai expects `/.well-known/oauth-protected-resource` without path suffix)
   - Also supports `/mcp` for backward compatibility
-- [ ] Mobile access when Claude app supports MCP
+- [x] Replaced Express/Railway with a Cloudflare Worker (Phase 4c)
+
+### Phase 4c: Cloudflare Worker ✅ (fork)
+- [x] Stateless `/mcp` via `agents` `createMcpHandler` + MCP SDK v2
+- [x] `@cloudflare/workers-oauth-provider` (DCR + CIMD + PKCE), Oura as upstream IdP
+- [x] Oura tokens in encrypted grant props; refresh + rotation in `tokenExchangeCallback`
+- [x] Single-user allowlist, consent page, CORS stripped from `/mcp`
+- [x] Worker tests in workerd (`@cloudflare/vitest-plugin`)
+- [ ] First real deploy + ChatGPT/Claude.ai connection (needs Oura app credentials)
 
 ### Phase 5: Advanced Analytics & Integrations (Future)
 - [ ] Advanced HRV analysis (frequency domain: VLF, LF, HF, LF/HF ratio)
@@ -192,7 +214,7 @@ Pre-defined templates that guide Claude through common health analysis tasks:
 - [ ] Integration with other health data sources (Apple Health, Fitbit, Garmin)
 - [ ] Predictive insights (e.g., illness prediction from temperature trends)
 
-**Current status:** Phase 4b complete. Railway deployed with OAuth 2.1 auth (Oura proxy), Claude.ai connector working. 28 tools, 7 resources, 7 prompts, 339 tests.
+**Current status:** Phase 4c built (Cloudflare Worker, not yet deployed). 29 tools, 7 resources, 7 prompts, 397 tests (368 node + 29 worker).
 
 ## Key Files
 
@@ -205,8 +227,9 @@ Pre-defined templates that guide Claude through common health analysis tasks:
 - `src/utils/formatters.ts` - Convert seconds to hours, format scores, etc.
 - `src/utils/analysis.ts` - Statistical analysis utilities (Phase 3 foundation)
 - `src/utils/dataCoverage.ts` - Helper logic for cross-endpoint data coverage summaries
-- `src/auth/mcp-oauth-provider.ts` - MCP OAuth 2.1 server provider (Phase 4b)
-- `src/transports/http.ts` - HTTP transport with OAuth 2.1 auth (Phase 4b)
+- `src/server.ts` - Shared server factory (stdio + Worker)
+- `src/worker/*` - Cloudflare Worker remote server
+- `wrangler.jsonc` - Worker config (`PUBLIC_BASE_URL`, `OAUTH_KV`, flags `nodejs_compat` + `global_fetch_strictly_public`)
 - `scripts/validate-fixtures.ts` - Validate test fixtures against real Oura API
 - `docs/RESEARCH.md` - **Competitive analysis, derived metrics formulas, Phase 3 inspiration**
 
@@ -280,7 +303,9 @@ pnpm install          # Install dependencies
 pnpm build            # Compile TypeScript
 pnpm dev              # Watch mode
 pnpm start            # Run the server (stdio transport)
-pnpm start:http       # Run with HTTP transport (for remote deployment)
+pnpm dev:worker       # wrangler dev (Cloudflare Worker) on :8787, needs .dev.vars
+pnpm test:worker      # Worker tests only (workerd)
+pnpm typecheck:worker # tsc -p tsconfig.worker.json (also part of pnpm build)
 
 # Authentication (Phase 4a)
 npx oura-ring-mcp auth     # OAuth flow: opens browser, saves credentials
@@ -288,9 +313,9 @@ npx oura-ring-mcp status   # Check authentication status
 npx oura-ring-mcp logout   # Clear stored credentials
 
 # Testing
-pnpm test             # Run all tests
+pnpm test             # Run all tests (vitest projects: node + worker)
 pnpm test:watch       # Watch mode for development
-pnpm test:coverage    # Run tests with coverage report
+pnpm test:coverage    # Coverage for the node project (CI gate)
 pnpm test:ui          # Open Vitest UI in browser
 
 # OpenAPI & Type Generation
@@ -380,7 +405,7 @@ pnpm build
 
 This will:
 1. Scrape the latest OpenAPI spec download link from https://cloud.ouraring.com/v2/docs
-2. Download the spec automatically (currently v1.27)
+2. Download the spec automatically (currently 1.43)
 3. Generate fresh TypeScript types
 4. Rebuild the project
 
@@ -419,66 +444,22 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 Then restart Claude Desktop.
 
-## Remote Deployment (Railway)
+## Remote Deployment (Cloudflare Worker)
 
-Deploy the MCP server for remote access (e.g., from mobile Claude when supported).
+See README "Remote Server on Cloudflare" for user-facing steps. Developer notes:
 
-**1. Prerequisites:**
-- Railway account (https://railway.app)
-- Oura PAT token (https://cloud.ouraring.com/personal-access-tokens)
-- Generate a secret: `openssl rand -base64 32`
-
-**2. Deploy to Railway:**
-```bash
-# Install Railway CLI
-npm install -g @railway/cli
-
-# Login and deploy
-railway login
-railway init
-railway up
-```
-
-**3. Set Environment Variables** (in Railway dashboard):
-```
-OURA_ACCESS_TOKEN=your_oura_pat_token
-MCP_SECRET=your_random_secret_here
-NODE_ENV=production
-```
-
-**4. Configure Claude Desktop for Remote:**
-```json
-{
-  "mcpServers": {
-    "oura-remote": {
-      "url": "https://your-app.railway.app/mcp",
-      "headers": {
-        "Authorization": "Bearer your_random_secret_here"
-      }
-    }
-  }
-}
-```
-
-**Local Testing:**
-```bash
-# Test HTTP transport locally
-MCP_SECRET=test-secret pnpm start:http
-
-# Test health endpoint
-curl http://localhost:3000/health
-
-# Test with auth
-curl -X POST http://localhost:3000/mcp \
-  -H "Authorization: Bearer test-secret" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{"capabilities":{}},"id":1}'
-```
+- Entry `src/worker/index.ts` must export only the default handler (workerd treats named exports as entrypoints); helpers live in other modules.
+- All public URLs (issuer, endpoints, resource) derive from `PUBLIC_BASE_URL`; the provider is built lazily per base URL. `apiRoute` is the full `${base}/mcp`, so requests for other hosts never reach the MCP handler.
+- OAuth endpoints are under `/oauth/*` (not `/mcp/*`: `apiRoute` protects path-boundary descendants of `/mcp`).
+- Tom's deployment: no routes / workers_dev off; the `dixi-site` Worker (dixi.lulolabs.co) forwards the Worker's paths over a service binding.
+- Secrets: `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET`, `ALLOWED_OURA_USER_ID` and/or `ALLOWED_OURA_EMAIL`. `.dev.vars` is gitignored.
+- Never log tokens, codes, props or Oura data. `onError` logs code + internal reason only.
 
 ## Oura API Reference
 
 - Docs: https://cloud.ouraring.com/v2/docs
-- Get token: https://cloud.ouraring.com/personal-access-tokens
+- OAuth apps: https://developer.ouraring.com/applications (PATs no longer issued since Dec 2025)
+- `/heartrate` and `/ring_battery_level` take `start_datetime`/`end_datetime` (not dates) and paginate via `next_token`
 - Rate limit: 5000 requests per 5 minutes
 - All durations are in **seconds** (we convert to hours/minutes for display)
 
@@ -497,41 +478,21 @@ curl -X POST http://localhost:3000/mcp \
 
 ## Auth Strategy
 
-**Option 1: Personal Access Token (simplest)**
-```bash
-export OURA_ACCESS_TOKEN=your_token_here
-# Get token at: https://cloud.ouraring.com/personal-access-tokens
-```
+**Option 1: OAuth CLI Flow (recommended for local use)**
 
-**Option 2: OAuth CLI Flow (Phase 4a - implemented)**
-
-First, create an OAuth app at https://cloud.ouraring.com/oauth/applications, then:
+Create an OAuth app at https://developer.ouraring.com/applications (redirect `http://localhost:3000/callback`), then:
 ```bash
 export OURA_CLIENT_ID=your_client_id
 export OURA_CLIENT_SECRET=your_client_secret
-
 npx oura-ring-mcp auth     # Opens browser → Oura OAuth → localhost callback
-npx oura-ring-mcp status   # Check authentication status
-npx oura-ring-mcp logout   # Clear stored credentials
+npx oura-ring-mcp status
+npx oura-ring-mcp logout
 ```
-Credentials saved to `~/.oura-mcp/credentials.json`. Server auto-refreshes expired tokens.
+Credentials saved to `~/.oura-mcp/credentials.json`. With OURA_CLIENT_ID/SECRET in the server env, the stdio server refreshes on demand during the session (TokenManager, single-flight) and saves each rotated refresh token.
 
-**Option 3: Remote via Claude.ai connector (Phase 4b - implemented)**
+**Option 2: Legacy personal access token** — `OURA_ACCESS_TOKEN` (deprecated by Oura in Dec 2025; existing tokens may still work).
 
-The HTTP transport proxies OAuth through Oura — users authenticate directly with Oura:
-- Server runs on Railway (or any host) with `--http` flag
-- Claude.ai discovers OAuth metadata at `/.well-known/oauth-authorization-server`
-- Dynamic client registration (RFC 7591) + PKCE (S256) authorization
-- `/authorize` redirects to Oura OAuth → user authorizes → Oura redirects to `/oauth/callback`
-- Server exchanges Oura code for tokens, then redirects back to Claude.ai
-- No PAT needed — the server gets Oura tokens via the OAuth flow
-- `MCP_SECRET` env var is also accepted as a static bearer token (requires `OURA_ACCESS_TOKEN`)
-
-Required env vars for OAuth:
-- `OURA_CLIENT_ID` - From Oura OAuth app
-- `OURA_CLIENT_SECRET` - From Oura OAuth app
-- `RAILWAY_PUBLIC_DOMAIN` or `BASE_URL` - Public URL for OAuth metadata
-- Oura app redirect URI must be set to `{BASE_URL}/oauth/callback`
+**Option 3: Remote via Cloudflare Worker** — see "Remote Deployment (Cloudflare Worker)".
 
 ## Oura API Quirks
 

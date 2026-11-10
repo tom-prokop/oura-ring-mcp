@@ -140,6 +140,7 @@ New tokens can no longer be created, and `OURA_ACCESS_TOKEN` takes precedence ov
 | `get_enhanced_tags` | Rich tags with names, types, and time ranges |
 | `get_personal_info` | Profile details used for Oura insights |
 | `get_ring_info` | Ring hardware and firmware details |
+| `get_ring_battery` | Latest ring battery level, or per-day battery for a range |
 
 ### Smart Analysis
 
@@ -164,6 +165,8 @@ New tokens can no longer be created, and `OURA_ACCESS_TOKEN` takes precedence ov
 | `oura://baseline` | Your 30-day averages and normal ranges |
 | `oura://monthly-insights` | 30-day analysis with trends and anomalies |
 | `oura://tag-summary` | Your tags and usage frequency |
+| `oura://streaks` | Current and best streaks for sleep, readiness and steps |
+| `oura://weekly-report` | Weekly report with comparisons and recommendations |
 
 ## Prompts
 
@@ -175,93 +178,87 @@ New tokens can no longer be created, and `OURA_ACCESS_TOKEN` takes precedence ov
 | `compare-weeks` | This week vs last week comparison |
 | `tag-analysis` | How a specific tag affects your health |
 
-## Remote Deployment (Railway)
+## Remote Server on Cloudflare (ChatGPT, Claude.ai)
 
-Deploy the MCP server for remote access. The server proxies OAuth through Oura, so users authenticate directly with their Oura account — no PAT needed.
+`src/worker/` is a Cloudflare Worker that serves the same tools, resources and prompts over Streamable HTTP at `/mcp`, so you can use your Oura data from ChatGPT and Claude.ai (web and mobile). It is meant for **one person's** data:
 
-### 1. Create an Oura OAuth App
+- **Sign-in:** the Worker is an OAuth 2.1 server for MCP clients ([`@cloudflare/workers-oauth-provider`](https://github.com/cloudflare/workers-oauth-provider): dynamic client registration for Claude.ai, Client ID Metadata Documents for ChatGPT, PKCE) and uses Oura as the identity provider. You see a consent page, then sign in with Oura.
+- **Allowlist (on by default):** only the Oura account set in `ALLOWED_OURA_USER_ID` and/or `ALLOWED_OURA_EMAIL` can finish sign-in. With neither set, every account is refused (the refusal page shows your own Oura id so you can set it). Set the var `ALLOW_ANY_OURA_USER=true` only if you really want a multi-user server.
+- **Tokens:** Oura tokens are stored in the grant's encrypted props in KV. MCP access tokens last at most 1 hour and never outlive the Oura token; when a client refreshes, the Worker refreshes Oura if needed and saves Oura's rotated refresh token. If Oura rejects the refresh token (you revoked access), the MCP grant is revoked and the client asks you to reconnect.
+- **Stateless:** each `/mcp` request builds a fresh server and Oura client for that grant (no Durable Objects).
 
-1. Go to [Oura OAuth Applications](https://cloud.ouraring.com/oauth/applications)
-2. Create a new application
-3. Set the **Redirect URI** to: `https://your-app.railway.app/oauth/callback`
-4. Note the **Client ID** and **Client Secret**
+### Paths the Worker serves
 
-### 2. Deploy
+| Path | Purpose |
+|------|---------|
+| `/mcp` | MCP endpoint (Streamable HTTP, Bearer token required) |
+| `/oauth/authorize` | Consent page (GET) and approval (POST) |
+| `/oauth/token` | Token, refresh and revocation endpoint |
+| `/oauth/register` | Dynamic client registration |
+| `/oura/callback` | Oura OAuth redirect |
+| `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414) |
+| `/.well-known/oauth-protected-resource/mcp` | Protected resource metadata (RFC 9728) |
+
+Everything else returns 404, so the Worker can sit behind another site's domain (see below).
+
+### 1. Create an Oura OAuth app
+
+1. Go to [developer.ouraring.com/applications](https://developer.ouraring.com/applications) and create an application (or reuse one you own).
+2. Set the **Redirect URI** to `https://<your-host>/oura/callback` (for example `https://oura-mcp.example.com/oura/callback`).
+3. Allow these scopes: `email personal daily heartrate workout tag session spo2 ring_configuration stress heart_health`. Override the requested list with the `OURA_SCOPES` var if your app has fewer.
+4. Note the client ID and secret. Unapproved Oura apps are limited to 10 users, which is plenty here.
+
+### 2. Configure and deploy
 
 ```bash
-# Install Railway CLI
-npm install -g @railway/cli
+pnpm install
+npx wrangler login
 
-# Login, init, and deploy
-railway login
-railway init
-railway up
+# In wrangler.jsonc: set account_id and PUBLIC_BASE_URL (https://<your-host>, no trailing slash)
+
+# Secrets (wrangler prompts for each value; never put them in files or command lines)
+npx wrangler secret put OURA_CLIENT_ID
+npx wrangler secret put OURA_CLIENT_SECRET
+npx wrangler secret put ALLOWED_OURA_USER_ID     # and/or ALLOWED_OURA_EMAIL
+
+npx wrangler deploy        # creates the OAUTH_KV namespace on first deploy
 ```
 
-### 3. Set Environment Variables
+Routing: `wrangler.jsonc` ships with `workers_dev: false` and no routes because this fork is served through a service binding from another Worker on `dixi.lulolabs.co`. For a standalone deployment add a custom domain instead, e.g. `"routes": [{ "pattern": "oura-mcp.example.com", "custom_domain": true }]`, and set `PUBLIC_BASE_URL` to match. If you front it with another Worker, forward exactly the paths above, unchanged, to this Worker's service binding.
 
-In the Railway dashboard, add:
+Don't know your Oura user id yet? Deploy without `ALLOWED_OURA_*`, connect once: the refusal page shows your id, then set the secret and connect again.
 
-| Variable | Description |
-|----------|-------------|
-| `OURA_CLIENT_ID` | From your Oura OAuth app |
-| `OURA_CLIENT_SECRET` | From your Oura OAuth app |
-| `NODE_ENV` | `production` |
-| `MCP_SECRET` | *(Optional)* Static bearer token for Claude Desktop (`openssl rand -base64 32`) |
-| `OURA_ACCESS_TOKEN` | *(Optional)* PAT fallback if not using OAuth (`MCP_SECRET` required) |
+### 3. Connect from ChatGPT
 
-Railway automatically sets `PORT` and `RAILWAY_PUBLIC_DOMAIN`.
+1. ChatGPT → **Settings → Apps & Connectors → Advanced settings**, enable **Developer mode**.
+2. **Create** a connector: name it "Oura", set the MCP server URL to `https://<your-host>/mcp`, authentication **OAuth**, and leave client ID/secret empty.
+3. Accept the consent page, sign in with Oura, and the tools appear in chats where the connector is enabled.
 
 ### 4. Connect from Claude.ai
 
-Use the **connector** in Claude.ai:
-1. Go to Settings > MCP Connectors > Add
-2. Enter your server URL: `https://your-app.railway.app` (without `/mcp`)
-3. Leave OAuth Client ID and Secret empty (dynamic registration handles it)
-4. You'll be redirected to Oura to authorize access to your data
+1. Claude.ai → **Settings → Connectors → Add custom connector**.
+2. URL: `https://<your-host>/mcp`. Leave the OAuth client ID/secret empty (dynamic registration handles it).
+3. Click **Connect**, approve, and sign in with Oura.
 
-### 5. Connect from Claude Desktop
-
-For Claude Desktop, use `MCP_SECRET` + `OURA_ACCESS_TOKEN`:
-
-```json
-{
-  "mcpServers": {
-    "oura-remote": {
-      "url": "https://your-app.railway.app/mcp",
-      "headers": {
-        "Authorization": "Bearer your_mcp_secret_here"
-      }
-    }
-  }
-}
-```
-
-### Local Testing
+### Local development
 
 ```bash
-# With Oura OAuth (full flow)
-OURA_CLIENT_ID=your_id OURA_CLIENT_SECRET=your_secret pnpm start:http
-
-# With static secret only (requires OURA_ACCESS_TOKEN)
-OURA_ACCESS_TOKEN=your_pat MCP_SECRET=test-secret pnpm start:http
-
-# Verify health endpoint
-curl http://localhost:3000/health
-
-# Check OAuth metadata (only available when OURA_CLIENT_ID is set)
-curl http://localhost:3000/.well-known/oauth-authorization-server
-
-# Test authenticated request (with static secret)
-curl -X POST http://localhost:3000/mcp \
-  -H "Authorization: Bearer test-secret" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{"capabilities":{}},"id":1}'
+cp .dev.vars.example .dev.vars   # gitignored; PUBLIC_BASE_URL=http://localhost:8787
+pnpm dev:worker                  # wrangler dev on http://localhost:8787
+curl http://localhost:8787/.well-known/oauth-authorization-server
+curl -i -X POST http://localhost:8787/mcp   # 401 with a WWW-Authenticate discovery challenge
+pnpm test:worker                 # Worker tests inside workerd
 ```
+
+A full local sign-in needs an Oura app whose redirect URI is `http://localhost:8787/oura/callback`.
 
 ## Contributing
 
 See [CLAUDE.md](CLAUDE.md) for architecture details and development guidelines.
+
+## Credits
+
+Created by [Mitch Hankins](https://github.com/mitchhankins01/oura-ring-mcp). This fork adds the Cloudflare Worker remote server, OAuth token rotation fixes and MCP SDK v2, and includes upstream community PRs #5, #7, #8, #9 and #10.
 
 ## License
 
