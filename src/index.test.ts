@@ -66,11 +66,11 @@ const mockRegisterResources = vi.fn();
 const mockRegisterPrompts = vi.fn();
 
 // Mock the MCP SDK modules before importing index
-vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => ({
+vi.mock("@modelcontextprotocol/server", () => ({
   McpServer: MockMcpServer,
 }));
 
-vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
+vi.mock("@modelcontextprotocol/server/stdio", () => ({
   StdioServerTransport: MockStdioServerTransport,
 }));
 

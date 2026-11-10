@@ -4,8 +4,7 @@
  * each tool's outputSchema (the SDK client rejects mismatches).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
 import { createOuraMcpServer } from "./server.js";
 import type { OuraClient } from "./client.js";

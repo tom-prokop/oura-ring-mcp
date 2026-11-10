@@ -49,17 +49,18 @@
   "author": "Mitch Hankins",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@modelcontextprotocol/server": "2.4.0",
+    "agents": "0.33.0",
     "dotenv": "^17.2.3",
-    "express": "^5.2.1",
     "zod": "^4.3.6"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/inspector": "^0.19.0",
-    "@types/express": "^5.0.6",
     "@types/node": "^25.0.10",
     "@vitest/coverage-v8": "^4.0.18",
     "@vitest/ui": "^4.0.18",
@@ -68,6 +69,7 @@
     "js-yaml": "^4.1.1",
     "openapi-typescript": "^7.10.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "wrangler": "^4.160.0"
   }
 }

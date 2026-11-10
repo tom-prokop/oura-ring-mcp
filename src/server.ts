@@ -3,7 +3,7 @@
  * (src/index.ts) and the Cloudflare Worker (src/worker.ts).
  * Runtime-neutral: no node: imports.
  */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 
 import type { OuraClient } from "./client.js";
 import { registerTools } from "./tools/index.js";

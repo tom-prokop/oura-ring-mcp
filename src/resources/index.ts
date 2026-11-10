@@ -5,7 +5,7 @@
  * Unlike tools, resources don't take parameters - they represent static or dynamic data.
  */
 
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import type { OuraClient, SleepSession, DailyReadiness, DailyActivity } from "../client.js";
 import {
   formatDuration,

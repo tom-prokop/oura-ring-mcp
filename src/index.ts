@@ -7,13 +7,12 @@
  *
  * CLI Commands:
  *   npx oura-ring-mcp          - Start the MCP server (stdio transport)
- *   npx oura-ring-mcp --http   - Start with HTTP transport (for remote deployment)
  *   npx oura-ring-mcp auth     - Authenticate with Oura via OAuth
  *   npx oura-ring-mcp logout   - Clear stored credentials
  *   npx oura-ring-mcp status   - Show authentication status
  */
 import "dotenv/config";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -36,7 +35,6 @@ const VERSION: string = pkg.version;
 
 const args = process.argv.slice(2);
 const command = args[0];
-const useHttpTransport = args.includes("--http") || args.includes("-H");
 
 // Handle CLI subcommands
 if (["auth", "logout", "status"].includes(command)) {
@@ -69,7 +67,7 @@ if (["auth", "logout", "status"].includes(command)) {
  *      OURA_CLIENT_ID/SECRET are set, tokens are refreshed on demand for the
  *      lifetime of the process and each rotated refresh token is saved.
  *
- * Returns null if no token is found (HTTP mode can start without one).
+ * Returns null if no token is found.
  */
 async function resolveClientConfig(): Promise<OuraClientConfig | null> {
   const envToken = process.env.OURA_ACCESS_TOKEN || process.env.OURA_PERSONAL_ACCESS_TOKEN;
@@ -127,8 +125,7 @@ async function resolveClientConfig(): Promise<OuraClientConfig | null> {
 
 const clientConfig = await resolveClientConfig();
 
-// For stdio transport, a token is required upfront
-if (!clientConfig && !useHttpTransport) {
+if (!clientConfig) {
   console.error(
     "Error: No Oura credentials found.\n\n" +
       "Recommended: authenticate via OAuth\n" +
@@ -141,14 +138,7 @@ if (!clientConfig && !useHttpTransport) {
   process.exit(1);
 }
 
-if (!clientConfig && useHttpTransport) {
-  console.error(
-    "Warning: No Oura credentials found. Server will start but API calls will fail.\n" +
-      "Set OURA_ACCESS_TOKEN environment variable to enable data access."
-  );
-}
-
-const ouraClient = new OuraClient(clientConfig ?? { accessToken: "" });
+const ouraClient = new OuraClient(clientConfig!);
 const server = createOuraMcpServer(ouraClient, VERSION);
 
 // ─────────────────────────────────────────────────────────────
@@ -156,16 +146,11 @@ const server = createOuraMcpServer(ouraClient, VERSION);
 // ─────────────────────────────────────────────────────────────
 
 async function main() {
-  if (useHttpTransport) {
-    // HTTP transport for remote deployment
-    const { startHttpServer } = await import("./transports/http.js");
-    await startHttpServer(server, { ouraClient });
-  } else {
-    // Stdio transport for local use (Claude Desktop)
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error("Oura MCP server running on stdio");
-  }
+  // Stdio transport for local use (Claude Desktop). Remote access is the
+  // Cloudflare Worker in src/worker.ts.
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("Oura MCP server running on stdio");
 }
 
 main().catch((error) => {
