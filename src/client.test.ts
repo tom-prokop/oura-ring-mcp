@@ -336,6 +336,18 @@ describe("OuraClient", () => {
   // Heart rate endpoints
   // ─────────────────────────────────────────────────────────────
 
+  describe("getAccessToken option", () => {
+    it("asks the token source before each request", async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ data: [] }) });
+      const source = vi.fn().mockResolvedValueOnce("t1").mockResolvedValueOnce("t2");
+      const c = new OuraClient({ accessToken: "unused", getAccessToken: source });
+      await c.getDailyReadiness("2024-01-15", "2024-01-16");
+      await c.getDailyReadiness("2024-01-15", "2024-01-16");
+      expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe("Bearer t1");
+      expect(mockFetch.mock.calls[1][1].headers.Authorization).toBe("Bearer t2");
+    });
+  });
+
   describe("setAccessToken", () => {
     it("uses the new token for subsequent requests", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });

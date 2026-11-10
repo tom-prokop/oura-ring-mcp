@@ -285,7 +285,55 @@ describe("MCP Server", () => {
         "refresh-token",
         expect.objectContaining({ clientId: "test-client" })
       );
-      expect(MockOuraClient.lastConfig).toEqual({ accessToken: "refreshed-token" });
+      expect(MockOuraClient.lastConfig).toMatchObject({ accessToken: "refreshed-token" });
+    });
+
+    it("refreshes on demand later in the session and uses the rotated refresh token", async () => {
+      delete process.env.OURA_ACCESS_TOKEN;
+      delete process.env.OURA_PERSONAL_ACCESS_TOKEN;
+
+      mockLoadCredentials.mockResolvedValue({
+        access_token: "valid-token",
+        refresh_token: "refresh-1",
+        expires_at: Date.now() + 120_000,
+      });
+      mockIsExpired.mockReturnValue(false);
+      mockGetOAuthConfigFromEnv.mockReturnValue({
+        clientId: "test-client",
+        clientSecret: "test-secret",
+        redirectUri: "http://localhost:3000/callback",
+      });
+      mockRefreshAccessToken
+        .mockResolvedValueOnce({ access_token: "a2", refresh_token: "refresh-2", expires_at: 0 })
+        .mockResolvedValueOnce({ access_token: "a3", refresh_token: "refresh-3", expires_at: Date.now() + 3600_000 });
+
+      await import("./index.js");
+
+      const config = MockOuraClient.lastConfig as { accessToken: string; getAccessToken: () => Promise<string> };
+      expect(config.accessToken).toBe("valid-token");
+      expect(await config.getAccessToken()).toBe("valid-token");
+      expect(mockRefreshAccessToken).not.toHaveBeenCalled();
+
+      vi.useFakeTimers({ now: Date.now() + 10 * 60_000 });
+      try {
+        expect(await config.getAccessToken()).toBe("a2");
+        expect(await config.getAccessToken()).toBe("a3");
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(mockRefreshAccessToken.mock.calls.map((c) => c[0])).toEqual(["refresh-1", "refresh-2"]);
+    });
+
+    it("uses stored token without refresh support when no OAuth app is configured", async () => {
+      delete process.env.OURA_ACCESS_TOKEN;
+      delete process.env.OURA_PERSONAL_ACCESS_TOKEN;
+      mockLoadCredentials.mockResolvedValue({ access_token: "s", refresh_token: "r", expires_at: Date.now() + 3600_000 });
+      mockIsExpired.mockReturnValue(false);
+      mockGetOAuthConfigFromEnv.mockReturnValue(null);
+
+      await import("./index.js");
+
+      expect(MockOuraClient.lastConfig).toEqual({ accessToken: "s" });
     });
   });
 });

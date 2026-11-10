@@ -41,6 +41,11 @@ export type SleepTime = components["schemas"]["SleepTimeModel"];
 
 export interface OuraClientConfig {
   accessToken: string;
+  /**
+   * Optional async token source, called before every request. Lets long-running
+   * hosts refresh expired OAuth tokens on demand (see auth/token-manager.ts).
+   */
+  getAccessToken?: () => Promise<string>;
 }
 
 // Generic response wrapper from Oura API
@@ -51,9 +56,11 @@ export interface OuraResponse<T> {
 
 export class OuraClient {
   private accessToken: string;
+  private tokenSource?: () => Promise<string>;
 
   constructor(config: OuraClientConfig) {
     this.accessToken = config.accessToken;
+    this.tokenSource = config.getAccessToken;
   }
 
   /**
@@ -75,9 +82,10 @@ export class OuraClient {
       });
     }
 
+    const token = this.tokenSource ? await this.tokenSource() : this.accessToken;
     const response = await fetch(url.toString(), {
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        Authorization: `Bearer ${token}`,
       },
     });
 
