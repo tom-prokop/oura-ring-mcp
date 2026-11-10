@@ -33,58 +33,23 @@ Or use directly with npx (no install needed):
 npx oura-ring-mcp
 ```
 
-### 2. Authenticate with Oura
+### 2. Authenticate with Oura (OAuth)
 
-**Option A: Personal Access Token (simpler)**
+Oura stopped issuing personal access tokens in December 2025, so new users need OAuth.
 
-1. Go to [cloud.ouraring.com/personal-access-tokens](https://cloud.ouraring.com/personal-access-tokens)
-2. Create a new token
-3. Set `OURA_ACCESS_TOKEN` in your Claude Desktop config (see below)
-
-**Option B: OAuth CLI Flow**
-
-1. Create an OAuth app at [developer.ouraring.com](https://developer.ouraring.com/applications)
-   - Set Redirect URI to `http://localhost:3000/callback`
+1. Create an OAuth app at [developer.ouraring.com/applications](https://developer.ouraring.com/applications)
+   - Set the Redirect URI to `http://localhost:3000/callback`
 2. Run the auth flow:
    ```bash
    export OURA_CLIENT_ID=your_client_id
    export OURA_CLIENT_SECRET=your_client_secret
    npx oura-ring-mcp auth
    ```
-3. Credentials are saved to `~/.oura-mcp/credentials.json`
+3. Credentials are saved to `~/.oura-mcp/credentials.json` (mode 600).
 
 ### 3. Configure Claude Desktop
 
-Add to `claude_desktop_config.json`:
-
-**With Personal Access Token:**
-```json
-{
-  "mcpServers": {
-    "oura": {
-      "command": "npx",
-      "args": ["oura-ring-mcp"],
-      "env": {
-        "OURA_ACCESS_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
-```
-
-**With OAuth (after running `npx oura-ring-mcp auth`):**
-```json
-{
-  "mcpServers": {
-    "oura": {
-      "command": "npx",
-      "args": ["oura-ring-mcp"]
-    }
-  }
-}
-```
-
-The server reads credentials from `~/.oura-mcp/credentials.json`. To enable automatic token refresh, add your OAuth credentials:
+Add to `claude_desktop_config.json`. Include your OAuth app credentials so the server can refresh tokens on its own (Oura access tokens are short-lived and each refresh rotates the refresh token; the server saves the new one every time):
 
 ```json
 {
@@ -102,6 +67,26 @@ The server reads credentials from `~/.oura-mcp/credentials.json`. To enable auto
 ```
 
 Restart Claude Desktop. Requires Node >=18.
+
+<details>
+<summary>Legacy: personal access token (deprecated)</summary>
+
+If you still have a personal access token created before December 2025 it may keep working. Set it as `OURA_ACCESS_TOKEN` instead of the OAuth variables:
+
+```json
+{
+  "mcpServers": {
+    "oura": {
+      "command": "npx",
+      "args": ["oura-ring-mcp"],
+      "env": { "OURA_ACCESS_TOKEN": "your_token_here" }
+    }
+  }
+}
+```
+
+New tokens can no longer be created, and `OURA_ACCESS_TOKEN` takes precedence over stored OAuth credentials if both are set.
+</details>
 
 ## What Can I Ask?
 
