@@ -44,6 +44,8 @@ export interface OuraClientConfig {
   /**
    * Optional async token source, called before every request. Lets long-running
    * hosts refresh expired OAuth tokens on demand (see auth/token-manager.ts).
+   * Cleared by setAccessToken(). Hosts serving several users must create one
+   * client per user/session instead of sharing an instance.
    */
   getAccessToken?: () => Promise<string>;
 }
@@ -67,7 +69,10 @@ export class OuraClient {
    * Update the access token (e.g., after OAuth flow completes)
    */
   setAccessToken(token: string): void {
+    // An explicitly set token always wins: drop any async token source so a
+    // previously attached credential store can never answer for this client.
     this.accessToken = token;
+    this.tokenSource = undefined;
   }
 
   private async fetch<T>(

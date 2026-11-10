@@ -346,6 +346,16 @@ describe("OuraClient", () => {
       expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe("Bearer t1");
       expect(mockFetch.mock.calls[1][1].headers.Authorization).toBe("Bearer t2");
     });
+
+    it("an explicitly set token wins over the token source", async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ data: [] }) });
+      const source = vi.fn().mockResolvedValue("stored-credential-token");
+      const c = new OuraClient({ accessToken: "unused", getAccessToken: source });
+      c.setAccessToken("grant-token");
+      await c.getDailyReadiness("2024-01-15", "2024-01-16");
+      expect(source).not.toHaveBeenCalled();
+      expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe("Bearer grant-token");
+    });
   });
 
   describe("setAccessToken", () => {
