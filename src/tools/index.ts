@@ -36,6 +36,7 @@ import {
   DailyActivity,
   RestModePeriod,
   RingConfiguration,
+  RingBatteryLevel,
   SleepTime,
   PersonalInfo,
 } from "../client.js";
@@ -2804,6 +2805,36 @@ export function registerTools(server: McpServer, client: OuraClient) {
   );
 
   // ─────────────────────────────────────────────────────────────
+  // get_ring_battery tool
+  // ─────────────────────────────────────────────────────────────
+  server.registerTool(
+    "get_ring_battery",
+    {
+      title: "Ring Battery",
+      annotations: READ_ONLY_ANNOTATIONS,
+      description:
+        "Get the Oura ring's battery level. With no dates, returns the most recent reading. With a date range, summarizes battery samples (min/max, charging) per day - useful to explain gaps in sleep or activity data caused by a flat battery.",
+      inputSchema: {
+        start_date: z.string().optional().describe("Start date in YYYY-MM-DD format. Omit for the latest reading."),
+        end_date: z.string().optional().describe("End date in YYYY-MM-DD format. Defaults to start_date."),
+      },
+    },
+    async ({ start_date, end_date }) => {
+      try {
+        const response = await client.getRingBatteryLevel(start_date, end_date);
+        if (response.data.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "No ring battery data found for that period." }],
+          };
+        }
+        return { content: [{ type: "text" as const, text: formatBatteryLevels(response.data, !start_date) }] };
+      } catch (error) {
+        return { isError: true, content: [{ type: "text" as const, text: formatError(error) }] };
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────
   // get_ring_info tool
   // ─────────────────────────────────────────────────────────────
   server.registerTool(
@@ -3137,18 +3168,38 @@ function formatStress(day: DailyStress): string {
 
   lines.push("**Time Breakdown:**");
 
-  if (day.stress_high !== null) {
+  if (day.stress_high != null) {
     lines.push(`- High Stress: ${formatDuration(day.stress_high)}`);
   } else {
     lines.push("- High Stress: N/A");
   }
 
-  if (day.recovery_high !== null) {
+  if (day.recovery_high != null) {
     lines.push(`- High Recovery: ${formatDuration(day.recovery_high)}`);
   } else {
     lines.push("- High Recovery: N/A");
   }
 
+  return lines.join("\n");
+}
+
+function formatBatteryLevels(samples: RingBatteryLevel[], latestOnly: boolean): string {
+  const charging = (s: RingBatteryLevel) => (s.charging || s.in_charger ? " (charging)" : "");
+  if (latestOnly) {
+    const s = samples[samples.length - 1];
+    return `## Ring Battery\n\n**Level:** ${s.level}%${charging(s)}\n**As of:** ${s.timestamp}`;
+  }
+  const byDay = new Map<string, RingBatteryLevel[]>();
+  for (const s of samples) {
+    const day = s.timestamp.slice(0, 10);
+    byDay.set(day, [...(byDay.get(day) ?? []), s]);
+  }
+  const lines = [`## Ring Battery (${samples.length} samples)`, ""];
+  for (const [day, list] of byDay) {
+    const levels = list.map((s) => s.level);
+    const charged = list.some((s) => s.charging || s.in_charger);
+    lines.push(`- **${day}:** ${Math.min(...levels)}% - ${Math.max(...levels)}%${charged ? ", charged" : ""}`);
+  }
   return lines.join("\n");
 }
 
@@ -3245,7 +3296,7 @@ function formatSpo2(day: DailySpo2): string {
     lines.push("**Average SpO2:** N/A");
   }
 
-  if (day.breathing_disturbance_index !== null) {
+  if (day.breathing_disturbance_index != null) {
     lines.push(`**Breathing Disturbance Index:** ${day.breathing_disturbance_index.toFixed(1)}`);
 
     // Add context for BDI

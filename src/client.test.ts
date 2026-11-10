@@ -367,6 +367,25 @@ describe("OuraClient", () => {
     });
   });
 
+  describe("getRingBatteryLevel", () => {
+    it("requests only the latest sample when no range is given", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [{ level: 80 }] }) });
+      const result = await client.getRingBatteryLevel();
+      const url = new URL(mockFetch.mock.calls[0][0]);
+      expect(url.pathname).toBe("/v2/usercollection/ring_battery_level");
+      expect(url.searchParams.get("latest")).toBe("true");
+      expect(result.data[0].level).toBe(80);
+    });
+
+    it("uses datetime params for a date range (end defaults to start)", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });
+      await client.getRingBatteryLevel("2024-01-15");
+      const url = new URL(mockFetch.mock.calls[0][0]);
+      expect(url.searchParams.get("start_datetime")).toBe("2024-01-15T00:00:00");
+      expect(url.searchParams.get("end_datetime")).toBe("2024-01-16T00:00:00");
+    });
+  });
+
   describe("getHeartRate", () => {
     it("should fetch heart rate data", async () => {
       mockFetch.mockResolvedValueOnce({

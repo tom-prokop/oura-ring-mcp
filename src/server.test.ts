@@ -34,7 +34,7 @@ describe("MCP server (end to end)", () => {
 
   it("advertises title and read-only annotations on every tool", async () => {
     const { tools } = await client.listTools();
-    expect(tools.length).toBe(28);
+    expect(tools.length).toBe(29);
     for (const tool of tools) {
       expect(tool.title, tool.name).toBeTruthy();
       expect(tool.annotations, tool.name).toMatchObject({
@@ -97,5 +97,36 @@ describe("MCP server (end to end)", () => {
     const result = await client.callTool({ name: "get_activity", arguments: {} });
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toBeUndefined();
+  });
+
+  it("reads every resource without error", async () => {
+    const { resources } = await client.listResources();
+    expect(resources.length).toBe(7);
+    for (const r of resources) {
+      const result = await client.readResource({ uri: r.uri });
+      const first = result.contents[0] as { text?: string };
+      expect(first.text, r.uri).toBeTruthy();
+    }
+  });
+
+  it("reads every resource when Oura returns no data", async () => {
+    for (const key of Object.keys(mock) as Array<keyof typeof mock>) {
+      if (key.startsWith("get")) mock[key].mockResolvedValue({ data: [] });
+    }
+    const { resources } = await client.listResources();
+    for (const r of resources) {
+      const result = await client.readResource({ uri: r.uri });
+      expect((result.contents[0] as { text?: string }).text, r.uri).toBeTruthy();
+    }
+  });
+
+  it("renders every prompt", async () => {
+    const { prompts } = await client.listPrompts();
+    expect(prompts.length).toBe(7);
+    for (const p of prompts) {
+      const args = Object.fromEntries((p.arguments ?? []).map((a) => [a.name, "alcohol"]));
+      const result = await client.getPrompt({ name: p.name, arguments: args });
+      expect(result.messages.length, p.name).toBeGreaterThan(0);
+    }
   });
 });

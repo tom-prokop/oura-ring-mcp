@@ -20,7 +20,7 @@ if [ -z "$SPEC_PATH" ]; then
 fi
 
 SPEC_URL="${BASE_URL}${SPEC_PATH}"
-VERSION=$(echo "$SPEC_PATH" | grep -o '[0-9.]*' | head -1)
+VERSION=$(echo "$SPEC_PATH" | sed -E "s|.*openapi-([0-9.]+)\\.json|\1|")
 
 echo "📥 Downloading OpenAPI spec v${VERSION}..."
 echo "    URL: $SPEC_URL"

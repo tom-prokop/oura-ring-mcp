@@ -8,7 +8,7 @@ import { OuraApiError } from "./utils/errors.js";
 
 const BASE_URL = "https://api.ouraring.com/v2/usercollection";
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_HEARTRATE_PAGES = 20;
+const MAX_TIMESERIES_PAGES = 20;
 
 /**
  * Add days to a YYYY-MM-DD date string
@@ -20,24 +20,25 @@ function addDays(dateStr: string, days: number): string {
 }
 
 // Re-export commonly used types for convenience
-export type SleepSession = components["schemas"]["SleepModel"];
-export type DailySleep = components["schemas"]["DailySleepModel"];
-export type DailyReadiness = components["schemas"]["DailyReadinessModel"];
-export type DailyActivity = components["schemas"]["DailyActivityModel"];
-export type DailyStress = components["schemas"]["DailyStressModel"];
-export type HeartRate = components["schemas"]["HeartRateModel"];
+export type SleepSession = components["schemas"]["PublicModifiedSleepModel"];
+export type DailySleep = components["schemas"]["PublicDailySleep"];
+export type DailyReadiness = components["schemas"]["PublicDailyReadiness"];
+export type DailyActivity = components["schemas"]["PublicDailyActivity"];
+export type DailyStress = components["schemas"]["PublicDailyStress"];
+export type HeartRate = components["schemas"]["PublicHeartRateRow"];
 export type Workout = components["schemas"]["PublicWorkout"];
-export type DailySpo2 = components["schemas"]["DailySpO2Model"];
-export type VO2Max = components["schemas"]["VO2MaxModel"];
+export type DailySpo2 = components["schemas"]["PublicDailySpO2"];
+export type VO2Max = components["schemas"]["PublicVO2Max"];
 export type PersonalInfo = components["schemas"]["PersonalInfoResponse"];
 export type DailyResilience = components["schemas"]["DailyResilienceModel"];
-export type DailyCardiovascularAge = components["schemas"]["DailyCardiovascularAgeModel"];
+export type DailyCardiovascularAge = components["schemas"]["PublicDailyCardiovascularAge"];
 export type Tag = components["schemas"]["TagModel"];
 export type EnhancedTag = components["schemas"]["EnhancedTagModel"];
-export type Session = components["schemas"]["SessionModel"];
-export type RestModePeriod = components["schemas"]["RestModePeriodModel"];
-export type RingConfiguration = components["schemas"]["RingConfigurationModel"];
-export type SleepTime = components["schemas"]["SleepTimeModel"];
+export type Session = components["schemas"]["PublicSession"];
+export type RestModePeriod = components["schemas"]["PublicRestModePeriod"];
+export type RingConfiguration = components["schemas"]["PublicRingConfiguration"];
+export type SleepTime = components["schemas"]["PublicSleepTime"];
+export type RingBatteryLevel = components["schemas"]["PublicRingBatteryLevelRow"];
 
 export interface OuraClientConfig {
   accessToken: string;
@@ -208,10 +209,32 @@ export class OuraClient {
    * next_token; we follow up to MAX_HEARTRATE_PAGES pages.
    */
   async getHeartRate(start: string, end: string) {
+    return this.fetchTimeSeries<HeartRate>("heartrate", start, end);
+  }
+
+  /**
+   * Ring battery level samples (/ring_battery_level, added in API spec 1.43).
+   * With no range, asks Oura for only the most recent sample (latest=true).
+   */
+  async getRingBatteryLevel(start?: string, end?: string) {
+    if (!start) {
+      return this.fetch<OuraResponse<RingBatteryLevel>>("ring_battery_level", { latest: "true" });
+    }
+    return this.fetchTimeSeries<RingBatteryLevel>("ring_battery_level", start, end ?? start);
+  }
+
+  /**
+   * Time-series endpoints (/heartrate, /ring_battery_level) take
+   * start_datetime/end_datetime, not start_date/end_date (which they silently
+   * ignore - upstream issue #12). Plain YYYY-MM-DD dates are expanded to whole
+   * days: 00:00 on start, through 00:00 the day after end. Full ISO datetimes
+   * pass through unchanged. Follows next_token up to MAX_TIMESERIES_PAGES.
+   */
+  private async fetchTimeSeries<T>(endpoint: string, start: string, end: string): Promise<OuraResponse<T>> {
     const startDatetime = DATE_ONLY.test(start) ? `${start}T00:00:00` : start;
     const endDatetime = DATE_ONLY.test(end) ? `${addDays(end, 1)}T00:00:00` : end;
 
-    const data: HeartRate[] = [];
+    const data: T[] = [];
     let nextToken: string | null | undefined;
     let pages = 0;
     do {
@@ -220,13 +243,13 @@ export class OuraClient {
         end_datetime: endDatetime,
       };
       if (nextToken) params.next_token = nextToken;
-      const page = await this.fetch<OuraResponse<HeartRate>>("heartrate", params);
+      const page = await this.fetch<OuraResponse<T>>(endpoint, params);
       data.push(...page.data);
       nextToken = page.next_token;
       pages++;
-    } while (nextToken && pages < MAX_HEARTRATE_PAGES);
+    } while (nextToken && pages < MAX_TIMESERIES_PAGES);
 
-    return { data, next_token: nextToken ?? null } as OuraResponse<HeartRate>;
+    return { data, next_token: nextToken ?? null };
   }
 
   // ─────────────────────────────────────────────────────────────

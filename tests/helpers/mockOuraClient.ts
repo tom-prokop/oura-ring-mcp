@@ -15,6 +15,14 @@ import workoutResponse from "../fixtures/oura-workout-response.json" with { type
 import spo2Response from "../fixtures/oura-spo2-response.json" with { type: "json" };
 import vo2maxResponse from "../fixtures/oura-vo2max-response.json" with { type: "json" };
 import personalInfoResponse from "../fixtures/oura-personal-info-response.json" with { type: "json" };
+import cardiovascularAgeResponse from "../fixtures/oura-cardiovascular-age-response.json" with { type: "json" };
+import resilienceResponse from "../fixtures/oura-resilience-response.json" with { type: "json" };
+import enhancedTagsResponse from "../fixtures/oura-enhanced-tags-response.json" with { type: "json" };
+import tagsResponse from "../fixtures/oura-tags-response.json" with { type: "json" };
+import restModeResponse from "../fixtures/oura-rest-mode-response.json" with { type: "json" };
+import ringConfigurationResponse from "../fixtures/oura-ring-configuration-response.json" with { type: "json" };
+import sessionsResponse from "../fixtures/oura-sessions-response.json" with { type: "json" };
+import sleepTimeResponse from "../fixtures/oura-sleep-time-response.json" with { type: "json" };
 
 export type MockOuraClient = {
   [K in keyof OuraClient]: ReturnType<typeof vi.fn>;
@@ -32,11 +40,20 @@ export function createMockOuraClient(overrides?: Partial<MockOuraClient>): MockO
     getDailyActivity: vi.fn().mockResolvedValue(activityResponse),
     getDailyStress: vi.fn().mockResolvedValue(stressResponse),
     getHeartRate: vi.fn().mockResolvedValue(heartrateResponse),
+    getRingBatteryLevel: vi.fn().mockResolvedValue({ data: [] }),
     getWorkouts: vi.fn().mockResolvedValue(workoutResponse),
     getDailySpo2: vi.fn().mockResolvedValue(spo2Response),
     getVO2Max: vi.fn().mockResolvedValue(vo2maxResponse),
     getPersonalInfo: vi.fn().mockResolvedValue(personalInfoResponse),
-  };
+    getDailyCardiovascularAge: vi.fn().mockResolvedValue(cardiovascularAgeResponse),
+    getDailyResilience: vi.fn().mockResolvedValue(resilienceResponse),
+    getEnhancedTags: vi.fn().mockResolvedValue(enhancedTagsResponse),
+    getTags: vi.fn().mockResolvedValue(tagsResponse),
+    getRestModePeriods: vi.fn().mockResolvedValue(restModeResponse),
+    getRingConfiguration: vi.fn().mockResolvedValue(ringConfigurationResponse),
+    getSessions: vi.fn().mockResolvedValue(sessionsResponse),
+    getSleepTime: vi.fn().mockResolvedValue(sleepTimeResponse),
+  } as MockOuraClient;
 
   // Apply any overrides
   if (overrides) {
@@ -65,6 +82,7 @@ export function createErrorClient(errorMessage: string): MockOuraClient {
     getDailyActivity: vi.fn().mockRejectedValue(error),
     getDailyStress: vi.fn().mockRejectedValue(error),
     getHeartRate: vi.fn().mockRejectedValue(error),
+    getRingBatteryLevel: vi.fn().mockRejectedValue(error),
     getWorkouts: vi.fn().mockRejectedValue(error),
     getDailySpo2: vi.fn().mockRejectedValue(error),
     getVO2Max: vi.fn().mockRejectedValue(error),

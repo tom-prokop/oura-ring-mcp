@@ -54,6 +54,13 @@ function createMockClient(overrides: Partial<Record<keyof OuraClient, unknown>> 
     getDailyActivity: vi.fn().mockResolvedValue(activityResponse),
     getDailyStress: vi.fn().mockResolvedValue(stressResponse),
     getHeartRate: vi.fn().mockResolvedValue(heartrateResponse),
+    getRingBatteryLevel: vi.fn().mockResolvedValue({
+      data: [
+        { timestamp: "2024-01-15T08:00:00+00:00", timestamp_unix: 1, level: 40, charging: false, in_charger: false },
+        { timestamp: "2024-01-15T20:00:00+00:00", timestamp_unix: 2, level: 95, charging: true, in_charger: true },
+        { timestamp: "2024-01-16T08:00:00+00:00", timestamp_unix: 3, level: 70, charging: null, in_charger: null },
+      ],
+    }),
     getWorkouts: vi.fn().mockResolvedValue(workoutResponse),
     getDailySpo2: vi.fn().mockResolvedValue(spo2Response),
     getVO2Max: vi.fn().mockResolvedValue(vo2maxResponse),
@@ -94,8 +101,8 @@ describe("Tool Handlers", () => {
   // ─────────────────────────────────────────────────────────────
 
   describe("registerTools", () => {
-    it("should register all 28 tools", () => {
-      expect(mockServer.getToolCount()).toBe(28);
+    it("should register all 29 tools", () => {
+      expect(mockServer.getToolCount()).toBe(29);
     });
 
     it("should register expected tool names", () => {
@@ -119,6 +126,7 @@ describe("Tool Handlers", () => {
         "get_sleep_time",
         "get_rest_mode",
         "get_ring_info",
+        "get_ring_battery",
         "get_personal_info",
         // Smart analysis tools
         "detect_anomalies",
@@ -135,6 +143,37 @@ describe("Tool Handlers", () => {
       expectedTools.forEach((toolName) => {
         expect(mockServer.getToolHandler(toolName)).toBeDefined();
       });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // get_ring_battery tool
+  // ─────────────────────────────────────────────────────────────
+
+  describe("get_ring_battery", () => {
+    it("shows the latest level when no dates are given", async () => {
+      const result = await mockServer.getToolHandler("get_ring_battery")!({});
+      expect(mockClient.getRingBatteryLevel).toHaveBeenCalledWith(undefined, undefined);
+      expect(result.content[0].text).toContain("**Level:** 70%");
+    });
+
+    it("summarizes a range per day", async () => {
+      const result = await mockServer.getToolHandler("get_ring_battery")!({ start_date: "2024-01-15", end_date: "2024-01-16" });
+      expect(result.content[0].text).toContain("- **2024-01-15:** 40% - 95%, charged");
+      expect(result.content[0].text).toContain("- **2024-01-16:** 70% - 70%");
+    });
+
+    it("handles empty data and errors", async () => {
+      mockClient = createMockClient({ getRingBatteryLevel: vi.fn().mockResolvedValue({ data: [] }) });
+      mockServer = createMockServer();
+      registerTools(mockServer as unknown as Parameters<typeof registerTools>[0], mockClient);
+      expect((await mockServer.getToolHandler("get_ring_battery")!({})).content[0].text).toContain("No ring battery data");
+
+      mockClient = createMockClient({ getRingBatteryLevel: vi.fn().mockRejectedValue(new Error("nope")) });
+      mockServer = createMockServer();
+      registerTools(mockServer as unknown as Parameters<typeof registerTools>[0], mockClient);
+      const err = (await mockServer.getToolHandler("get_ring_battery")!({})) as { isError?: boolean };
+      expect(err.isError).toBe(true);
     });
   });
 

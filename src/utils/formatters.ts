@@ -81,8 +81,8 @@ export function percentage(part: number, whole: number): number {
  * Format a score with context
  * e.g., 85 -> "85 (Good)"
  */
-export function formatScore(score: number | null): string {
-  if (score === null) return "No data";
+export function formatScore(score: number | null | undefined): string {
+  if (score == null) return "No data";
 
   let label: string;
   if (score >= 85) label = "Optimal";
