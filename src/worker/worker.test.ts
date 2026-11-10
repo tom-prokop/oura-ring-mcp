@@ -216,6 +216,20 @@ describe("worker", () => {
     expect(prm.resource).toBe(`${BASE}/mcp`);
   });
 
+  it("serves the same metadata at the root and alternate discovery paths clients probe", async () => {
+    // ChatGPT and Claude.ai don't all follow the WWW-Authenticate hint; some look at the root.
+    const prm = (await (await call("/.well-known/oauth-protected-resource")).json()) as Record<string, unknown>;
+    expect(prm.resource).toBe(`${BASE}/mcp`);
+    expect(prm.authorization_servers).toEqual([BASE]);
+    for (const p of ["/.well-known/oauth-authorization-server/mcp", "/.well-known/openid-configuration"]) {
+      const res = await call(p);
+      expect(res.status, p).toBe(200);
+      const as = (await res.json()) as Record<string, string>;
+      expect(as.issuer, p).toBe(BASE);
+      expect(as.registration_endpoint, p).toBe(`${BASE}/oauth/register`);
+    }
+  });
+
   it("refuses /mcp without a valid token and sends the discovery challenge, without CORS", async () => {
     const res = await call("/mcp", { method: "POST", headers: { origin: "https://evil.example" }, body: "{}" });
     expect(res.status).toBe(401);
