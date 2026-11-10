@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "oura-mcp",
+  "main": "src/worker/index.ts",
+  "account_id": "d5b7ed90375f33a4ce43eb668f6b94d3",
+  "compatibility_date": "2026-11-01",
+  // nodejs_compat: agents/mcp/server uses AsyncLocalStorage.
+  // global_fetch_strictly_public: required for Client ID Metadata Document
+  // fetches (ChatGPT) — blocks SSRF via same-zone routing.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  // Reached only through a service binding from the "dixi-site" Worker that
+  // serves https://dixi.lulolabs.co. No public hostname of its own.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "vars": {
+    // Public origin MCP clients use. Every OAuth/metadata URL derives from it.
+    "PUBLIC_BASE_URL": "https://dixi.lulolabs.co"
+    // Optional: "OURA_SCOPES": "email personal daily heartrate workout tag session spo2 ring_configuration stress heart_health"
+    // Optional (disables the single-user allowlist): "ALLOW_ANY_OURA_USER": "true"
+  },
+
+  // OAuth grants, clients and tokens (hashed; props encrypted).
+  // No id: wrangler provisions the namespace on first deploy.
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+
+  // Secrets (wrangler secret put): OURA_CLIENT_ID, OURA_CLIENT_SECRET,
+  // ALLOWED_OURA_USER_ID and/or ALLOWED_OURA_EMAIL.
+
+  "observability": { "enabled": true }
+}
