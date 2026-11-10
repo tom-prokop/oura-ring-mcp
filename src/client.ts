@@ -7,6 +7,8 @@ import type { components } from "./types/oura-api.js";
 import { OuraApiError } from "./utils/errors.js";
 
 const BASE_URL = "https://api.ouraring.com/v2/usercollection";
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_HEARTRATE_PAGES = 20;
 
 /**
  * Add days to a YYYY-MM-DD date string
@@ -184,11 +186,34 @@ export class OuraClient {
   // Heart rate endpoints
   // ─────────────────────────────────────────────────────────────
 
-  async getHeartRate(startDate: string, endDate: string) {
-    return this.fetch<OuraResponse<HeartRate>>("heartrate", {
-      start_date: startDate,
-      end_date: endDate,
-    });
+  /**
+   * The /heartrate endpoint takes start_datetime/end_datetime (not
+   * start_date/end_date, which it silently ignores - upstream issue #12).
+   * Plain YYYY-MM-DD dates are expanded to cover whole days: start at
+   * 00:00 on startDate, end at 00:00 on the day after endDate. Full ISO
+   * datetimes are passed through unchanged. Results are paginated via
+   * next_token; we follow up to MAX_HEARTRATE_PAGES pages.
+   */
+  async getHeartRate(start: string, end: string) {
+    const startDatetime = DATE_ONLY.test(start) ? `${start}T00:00:00` : start;
+    const endDatetime = DATE_ONLY.test(end) ? `${addDays(end, 1)}T00:00:00` : end;
+
+    const data: HeartRate[] = [];
+    let nextToken: string | null | undefined;
+    let pages = 0;
+    do {
+      const params: Record<string, string> = {
+        start_datetime: startDatetime,
+        end_datetime: endDatetime,
+      };
+      if (nextToken) params.next_token = nextToken;
+      const page = await this.fetch<OuraResponse<HeartRate>>("heartrate", params);
+      data.push(...page.data);
+      nextToken = page.next_token;
+      pages++;
+    } while (nextToken && pages < MAX_HEARTRATE_PAGES);
+
+    return { data, next_token: nextToken ?? null } as OuraResponse<HeartRate>;
   }
 
   // ─────────────────────────────────────────────────────────────

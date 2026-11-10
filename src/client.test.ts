@@ -336,6 +336,15 @@ describe("OuraClient", () => {
   // Heart rate endpoints
   // ─────────────────────────────────────────────────────────────
 
+  describe("setAccessToken", () => {
+    it("uses the new token for subsequent requests", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });
+      client.setAccessToken("rotated-token");
+      await client.getDailyReadiness("2024-01-15", "2024-01-15");
+      expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe("Bearer rotated-token");
+    });
+  });
+
   describe("getHeartRate", () => {
     it("should fetch heart rate data", async () => {
       mockFetch.mockResolvedValueOnce({
@@ -349,6 +358,66 @@ describe("OuraClient", () => {
       expect(result.data).toHaveLength(6);
       expect(result.data[0].bpm).toBe(55);
       expect(result.data[0].source).toBe("sleep");
+    });
+
+    it("sends start_datetime/end_datetime covering the whole date range (issue #12)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: [], next_token: null }),
+      });
+
+      await client.getHeartRate("2024-01-15", "2024-01-16");
+
+      const url = new URL(mockFetch.mock.calls[0][0]);
+      expect(url.pathname).toBe("/v2/usercollection/heartrate");
+      expect(url.searchParams.get("start_datetime")).toBe("2024-01-15T00:00:00");
+      expect(url.searchParams.get("end_datetime")).toBe("2024-01-17T00:00:00");
+      expect(url.searchParams.has("start_date")).toBe(false);
+      expect(url.searchParams.has("end_date")).toBe(false);
+    });
+
+    it("passes full datetimes through unchanged", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: [] }),
+      });
+
+      await client.getHeartRate("2024-01-15T08:00:00-05:00", "2024-01-15T12:00:00-05:00");
+
+      const url = new URL(mockFetch.mock.calls[0][0]);
+      expect(url.searchParams.get("start_datetime")).toBe("2024-01-15T08:00:00-05:00");
+      expect(url.searchParams.get("end_datetime")).toBe("2024-01-15T12:00:00-05:00");
+    });
+
+    it("follows next_token pagination", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ data: [{ bpm: 50, source: "rest", timestamp: "2024-01-15T00:00:00+00:00" }], next_token: "abc" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ data: [{ bpm: 60, source: "awake", timestamp: "2024-01-15T12:00:00+00:00" }], next_token: null }),
+        });
+
+      const result = await client.getHeartRate("2024-01-15", "2024-01-15");
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(new URL(mockFetch.mock.calls[1][0]).searchParams.get("next_token")).toBe("abc");
+      expect(result.data.map((r) => r.bpm)).toEqual([50, 60]);
+      expect(result.next_token).toBeNull();
+    });
+
+    it("caps pagination at 20 pages", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [], next_token: "more" }),
+      });
+
+      const result = await client.getHeartRate("2024-01-01", "2024-01-30");
+
+      expect(mockFetch).toHaveBeenCalledTimes(20);
+      expect(result.next_token).toBe("more");
     });
   });
 

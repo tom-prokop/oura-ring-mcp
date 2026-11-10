@@ -591,7 +591,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
     "get_heart_rate",
     {
       description:
-        "Get individual heart rate readings throughout the day with timestamps and source (awake, rest, sleep, workout, etc.). Returns detailed time-series data. Use this for analyzing heart rate patterns, variability throughout the day, or correlating HR with activities.",
+        "Get individual heart rate readings throughout the day with timestamps and source (awake, rest, sleep, workout, etc.). Returns detailed time-series data. Use this for analyzing heart rate patterns, variability throughout the day, or correlating HR with activities. Dates cover whole days (00:00 UTC on start_date to 00:00 UTC after end_date); keep ranges short (a few days) as readings are every ~5 minutes.",
       inputSchema: {
         start_date: z.string().optional().describe("Start date in YYYY-MM-DD format. Defaults to today."),
         end_date: z.string().optional().describe("End date in YYYY-MM-DD format. Defaults to start_date."),
