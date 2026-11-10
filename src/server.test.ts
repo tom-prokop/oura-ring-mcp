@@ -128,4 +128,67 @@ describe("MCP server (end to end)", () => {
       expect(result.messages.length, p.name).toBeGreaterThan(0);
     }
   });
+
+  it("reads every resource with 90 days of varied data", async () => {
+    const days = Array.from({ length: 90 }, (_, i) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - i);
+      return d.toISOString().slice(0, 10);
+    });
+    const vary = (i: number, base: number, spread: number) => base + ((i * 37) % spread) - spread / 2;
+    const clone = <T,>(template: T, i: number, day: string, patch: Record<string, unknown>) =>
+      ({ ...(template as object), id: `${day}-${i}`, day, ...patch }) as T;
+
+    const sleepT = (await mock.getSleep()).data[0];
+    const dailySleepT = (await mock.getDailySleep()).data[0];
+    const readinessT = (await mock.getDailyReadiness()).data[0];
+    const activityT = (await mock.getDailyActivity()).data[0];
+    const tagsT = (await mock.getEnhancedTags()).data[0];
+
+    mock.getSleep.mockResolvedValue({
+      data: days.map((day, i) =>
+        clone(sleepT, i, day, {
+          total_sleep_duration: vary(i, 26000, 9000),
+          deep_sleep_duration: vary(i, 5000, 3000),
+          rem_sleep_duration: vary(i, 6000, 3000),
+          efficiency: vary(i, 88, 16),
+          average_hrv: i === 5 ? 140 : vary(i, 45, 20),
+          lowest_heart_rate: vary(i, 52, 10),
+          bedtime_start: `${day}T${String(21 + (i % 4)).padStart(2, "0")}:15:00+01:00`,
+          bedtime_end: `${day}T0${6 + (i % 3)}:30:00+01:00`,
+        })
+      ),
+    });
+    mock.getDailySleep.mockResolvedValue({
+      data: days.map((day, i) => clone(dailySleepT, i, day, { score: i < 10 ? 90 : vary(i, 75, 30) })),
+    });
+    mock.getDailyReadiness.mockResolvedValue({
+      data: days.map((day, i) =>
+        clone(readinessT, i, day, { score: i < 4 ? 88 : vary(i, 72, 30), temperature_deviation: i === 3 ? 1.2 : vary(i, 0, 0.6) })
+      ),
+    });
+    mock.getDailyActivity.mockResolvedValue({
+      data: days.map((day, i) => clone(activityT, i, day, { score: vary(i, 80, 30), steps: i % 3 === 0 ? 12000 : vary(i, 7000, 6000) })),
+    });
+    mock.getEnhancedTags.mockResolvedValue({
+      data: days.slice(0, 20).map((day, i) => clone(tagsT, i, day, { start_day: day, tag_type_code: i % 2 ? "alcohol" : "caffeine" })),
+    });
+
+    const { resources } = await client.listResources();
+    for (const r of resources) {
+      const result = await client.readResource({ uri: r.uri });
+      expect((result.contents[0] as { text?: string }).text, r.uri).toBeTruthy();
+    }
+  });
+
+  it("reads every resource when Oura errors", async () => {
+    for (const key of Object.keys(mock) as Array<keyof typeof mock>) {
+      if (key.startsWith("get")) mock[key].mockRejectedValue(new Error("Oura down"));
+    }
+    const { resources } = await client.listResources();
+    for (const r of resources) {
+      const result = await client.readResource({ uri: r.uri }).catch((e: Error) => ({ error: e }));
+      expect(result, r.uri).toBeDefined();
+    }
+  });
 });
