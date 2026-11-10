@@ -2,8 +2,6 @@
  * Utilities for formatting Oura data into human-readable strings
  */
 
-import { DateTime } from "luxon";
-
 /**
  * Convert seconds to a human-readable duration string
  * e.g., 27000 -> "7h 30m"
@@ -32,18 +30,27 @@ export function secondsToHours(seconds: number): number {
 /**
  * Format a timestamp to a readable time, preserving the original timezone
  * e.g., "2024-01-15T22:30:00-05:00" -> "10:30 PM"
- * 
- * Uses Luxon to parse ISO timestamps which natively preserves the timezone offset,
- * ensuring times display as the user experienced them.
+ *
+ * Oura returns local wall-clock times with the user's offset, so we read the
+ * clock time straight from the string instead of converting to the server's
+ * timezone (which would be UTC on most hosts, including Cloudflare Workers).
  */
+const ISO_DATETIME_PATTERN =
+  /^\d{4}-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+
 export function formatTime(isoTimestamp: string): string {
-  // Parse the ISO timestamp - Luxon preserves the offset from the string
-  const dt = DateTime.fromISO(isoTimestamp, { setZone: true });
-  if (!dt.isValid) {
-    console.warn(`formatTime: Invalid timestamp "${isoTimestamp}" - ${dt.invalidReason}`);
+  const match = ISO_DATETIME_PATTERN.exec(isoTimestamp);
+  if (!match) {
     return "Invalid Date";
   }
-  return dt.toFormat("h:mm a");
+  const [, month, day, hourStr, minute] = match;
+  const hour = Number(hourStr);
+  if (Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > 31 || hour > 23 || Number(minute) > 59) {
+    return "Invalid Date";
+  }
+  const period = hour < 12 ? "AM" : "PM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${minute} ${period}`;
 }
 
 /**

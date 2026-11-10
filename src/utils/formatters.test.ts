@@ -76,6 +76,14 @@ describe('formatTime', () => {
     // Invalid dates produce "Invalid Date"
     expect(formatTime('invalid')).toBe('Invalid Date');
     expect(formatTime('not-a-date')).toBe('Invalid Date');
+    expect(formatTime('2024-13-15T22:30:00Z')).toBe('Invalid Date');
+    expect(formatTime('2024-01-15T25:30:00Z')).toBe('Invalid Date');
+  });
+
+  it('accepts Z, fractional seconds and no-seconds forms', () => {
+    expect(formatTime('2024-01-15T22:30:00.000Z')).toBe('10:30 PM');
+    expect(formatTime('2024-01-15T06:05+02:00')).toBe('6:05 AM');
+    expect(formatTime('2024-01-15T12:30:00.123+05:30')).toBe('12:30 PM');
   });
 });
 
