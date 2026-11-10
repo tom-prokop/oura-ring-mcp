@@ -7,6 +7,16 @@
  */
 
 import { z } from "zod";
+import {
+  sleepOutputSchema,
+  sleepStructured,
+  readinessOutputSchema,
+  readinessStructured,
+  activityOutputSchema,
+  activityStructured,
+  heartRateOutputSchema,
+  heartRateStructured,
+} from "./structured.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   OuraClient,
@@ -61,6 +71,17 @@ import {
 // Register Tools with McpServer
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Every tool only reads from the Oura API (an external system), so all share
+ * the same hints. Clients such as ChatGPT use these to skip confirmations.
+ */
+export const READ_ONLY_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
 export function registerTools(server: McpServer, client: OuraClient) {
   // ─────────────────────────────────────────────────────────────
   // get_data_coverage tool
@@ -68,6 +89,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_data_coverage",
     {
+      title: "Oura Data Coverage",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Compact preflight check for Oura data availability across endpoints. Use this before deeper analysis to see which domains are available, sparse, missing, or errored.",
       inputSchema: {
@@ -255,8 +278,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_sleep",
     {
+      title: "Sleep",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get detailed sleep data for a date range. Returns sleep duration, stages (deep/REM/light), efficiency, heart rate, and HRV. Use this for analyzing sleep patterns and quality.",
+      outputSchema: sleepOutputSchema,
       inputSchema: {
         start_date: z.string().optional().describe("Start date in YYYY-MM-DD format. Defaults to today if not specified."),
         end_date: z.string().optional().describe("End date in YYYY-MM-DD format. Defaults to start_date if not specified."),
@@ -276,8 +302,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
         const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value.data : [];
         const scores = scoresResult.status === "fulfilled" ? scoresResult.value.data : [];
 
+        const structuredContent = sleepStructured(startDate, endDate, sessions, scores);
+
         if (sessions.length === 0 && scores.length === 0) {
           return {
+            structuredContent,
             content: [
               {
                 type: "text" as const,
@@ -300,6 +329,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         if (sessions.length === 0 && scores.length > 0) {
           const scoreOnlyFormatted = scores.map((day) => formatDailySleep(day));
           return {
+            structuredContent,
             content: [
               {
                 type: "text" as const,
@@ -310,6 +340,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         }
 
         return {
+          structuredContent,
           content: [
             {
               type: "text" as const,
@@ -319,6 +350,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         };
       } catch (error) {
         return {
+          isError: true,
           content: [
             {
               type: "text" as const,
@@ -336,8 +368,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_readiness",
     {
+      title: "Readiness",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get daily readiness scores and contributors (HRV balance, resting heart rate, body temperature, recovery). Use this to understand recovery and readiness to perform.",
+      outputSchema: readinessOutputSchema,
       inputSchema: {
         start_date: z.string().optional().describe("Start date in YYYY-MM-DD format. Defaults to today."),
         end_date: z.string().optional().describe("End date in YYYY-MM-DD format. Defaults to start_date."),
@@ -349,9 +384,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
         const endDate = end_date || startDate;
 
         const response = await client.getDailyReadiness(startDate, endDate);
+        const structuredContent = readinessStructured(startDate, endDate, response.data);
 
         if (response.data.length === 0) {
           return {
+            structuredContent,
             content: [
               {
                 type: "text" as const,
@@ -387,6 +424,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         });
 
         return {
+          structuredContent,
           content: [
             {
               type: "text" as const,
@@ -396,6 +434,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         };
       } catch (error) {
         return {
+          isError: true,
           content: [
             {
               type: "text" as const,
@@ -413,8 +452,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_activity",
     {
+      title: "Daily Activity",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get daily activity data including steps, calories, and activity breakdown (high/medium/low intensity). Use this to analyze movement and exercise patterns.",
+      outputSchema: activityOutputSchema,
       inputSchema: {
         start_date: z.string().optional().describe("Start date in YYYY-MM-DD format. Defaults to today."),
         end_date: z.string().optional().describe("End date in YYYY-MM-DD format. Defaults to start_date."),
@@ -426,9 +468,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
         const endDate = end_date || startDate;
 
         const response = await client.getDailyActivity(startDate, endDate);
+        const structuredContent = activityStructured(startDate, endDate, response.data);
 
         if (response.data.length === 0) {
           return {
+            structuredContent,
             content: [
               {
                 type: "text" as const,
@@ -456,6 +500,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         });
 
         return {
+          structuredContent,
           content: [
             {
               type: "text" as const,
@@ -465,6 +510,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         };
       } catch (error) {
         return {
+          isError: true,
           content: [
             {
               type: "text" as const,
@@ -482,6 +528,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_stress",
     {
+      title: "Daily Stress",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get daily stress levels and recovery time. Shows time spent in high stress vs high recovery zones, plus overall day summary (restored/normal/stressful). Use this to understand stress patterns and recovery balance.",
       inputSchema: {
@@ -536,6 +584,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_daily_sleep",
     {
+      title: "Daily Sleep Scores",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get daily sleep scores and contributors (efficiency, deep sleep, REM sleep, latency, timing, etc.). Different from get_sleep - this provides a single daily score with breakdown of what contributed to it. Use this for understanding sleep quality scoring.",
       inputSchema: {
@@ -590,8 +640,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_heart_rate",
     {
+      title: "Heart Rate",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get individual heart rate readings throughout the day with timestamps and source (awake, rest, sleep, workout, etc.). Returns detailed time-series data. Use this for analyzing heart rate patterns, variability throughout the day, or correlating HR with activities. Dates cover whole days (00:00 UTC on start_date to 00:00 UTC after end_date); keep ranges short (a few days) as readings are every ~5 minutes.",
+      outputSchema: heartRateOutputSchema,
       inputSchema: {
         start_date: z.string().optional().describe("Start date in YYYY-MM-DD format. Defaults to today."),
         end_date: z.string().optional().describe("End date in YYYY-MM-DD format. Defaults to start_date."),
@@ -603,9 +656,11 @@ export function registerTools(server: McpServer, client: OuraClient) {
         const endDate = end_date || startDate;
 
         const response = await client.getHeartRate(startDate, endDate);
+        const structuredContent = heartRateStructured(startDate, endDate, response.data);
 
         if (response.data.length === 0) {
           return {
+            structuredContent,
             content: [
               {
                 type: "text" as const,
@@ -618,6 +673,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         const formatted = formatHeartRateData(response.data);
 
         return {
+          structuredContent,
           content: [
             {
               type: "text" as const,
@@ -627,6 +683,7 @@ export function registerTools(server: McpServer, client: OuraClient) {
         };
       } catch (error) {
         return {
+          isError: true,
           content: [
             {
               type: "text" as const,
@@ -644,6 +701,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_workouts",
     {
+      title: "Workouts",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get workout sessions with activity type, duration, intensity, calories burned, and distance. Use this to analyze exercise patterns, workout frequency, and training load.",
       inputSchema: {
@@ -698,6 +757,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_spo2",
     {
+      title: "Blood Oxygen (SpO2)",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get daily SpO2 (blood oxygen saturation) percentage and breathing disturbance index. Use this to monitor respiratory health, detect sleep apnea patterns, or understand overnight oxygen levels.",
       inputSchema: {
@@ -752,6 +813,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_vo2_max",
     {
+      title: "VO2 Max",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get VO2 max measurements (cardiorespiratory fitness). VO2 max indicates the maximum amount of oxygen your body can use during intense exercise. Higher values indicate better cardiovascular fitness. Use this to track fitness improvements over time.",
       inputSchema: {
@@ -806,6 +869,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_resilience",
     {
+      title: "Resilience",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get daily resilience scores showing your body's capacity to recover from stress. Includes sleep recovery, daytime recovery, and stress contributors. Resilience levels range from limited to exceptional.",
       inputSchema: {
@@ -860,6 +925,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_cardiovascular_age",
     {
+      title: "Cardiovascular Age",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get your estimated cardiovascular (vascular) age based on heart health metrics. Compare your vascular age to your actual age to understand your cardiovascular health.",
       inputSchema: {
@@ -914,6 +981,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_tags",
     {
+      title: "Tags",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get user-created tags and notes. Tags help track lifestyle factors like caffeine, alcohol, meals, or custom notes that may affect sleep and recovery.",
       inputSchema: {
@@ -968,6 +1037,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_enhanced_tags",
     {
+      title: "Enhanced Tags",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get enhanced tags with rich data including custom tags, timestamps, and durations. Enhanced tags include predefined categories (sleep_aid, caffeine, alcohol, etc.) and custom user-created tags with names like medications, supplements, or lifestyle factors.",
       inputSchema: {
@@ -1022,6 +1093,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_sessions",
     {
+      title: "Sessions",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get meditation, breathing, and relaxation sessions recorded with Oura. Includes session type, duration, and biometrics like heart rate and HRV during the session.",
       inputSchema: {
@@ -1080,6 +1153,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "detect_anomalies",
     {
+      title: "Detect Anomalies",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Detect unusual readings in your health data over a time period. Uses statistical methods (IQR and Z-score) to flag outliers in sleep, HRV, heart rate, and activity. Useful for identifying nights with unusually poor sleep, stress spikes, or other anomalies.",
       inputSchema: {
@@ -1268,6 +1343,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "analyze_sleep_quality",
     {
+      title: "Analyze Sleep Quality",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Comprehensive sleep quality analysis over a time period. Shows trends, patterns by day of week, sleep debt, regularity score, and identifies your best/worst sleep days. Great for understanding what affects your sleep.",
       inputSchema: {
@@ -1416,6 +1493,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "correlate_metrics",
     {
+      title: "Correlate Metrics",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Find correlations between two health metrics. For example, see if your HRV correlates with sleep duration, or if activity affects your readiness. Returns correlation strength, direction, and statistical significance.",
       inputSchema: {
@@ -1563,6 +1642,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "compare_periods",
     {
+      title: "Compare Periods",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Compare health metrics between two time periods. Great for answering questions like 'How did I sleep this week vs last week?' or 'Was my HRV better last month?'. Returns side-by-side comparison with percentage changes.",
       inputSchema: {
@@ -1730,6 +1811,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "compare_conditions",
     {
+      title: "Compare Conditions",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Compare a health metric across different conditions. Supports manual tags (alcohol, caffeine) AND auto-tracked conditions: 'workout' (workout days vs rest days), 'high_activity' (high step days), 'meditation' (session days).",
       inputSchema: {
@@ -1981,6 +2064,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "best_sleep_conditions",
     {
+      title: "Best Sleep Conditions",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Analyze what conditions are associated with your best sleep nights. Looks at activity levels, workouts, meditation sessions, tags, and day-of-week patterns to identify what predicts good vs poor sleep.",
       inputSchema: {
@@ -2280,6 +2365,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "analyze_hrv_trend",
     {
+      title: "HRV Trend",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Analyze your HRV (Heart Rate Variability) trend over time. HRV is a key indicator of recovery and stress. Shows trend direction, rolling averages, and identifies recovery patterns.",
       inputSchema: {
@@ -2429,6 +2516,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "analyze_adherence",
     {
+      title: "Ring Wear Adherence",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Analyze how consistently you wear your Oura ring. Shows daily non-wear time, identifies gaps in data, and calculates adherence percentage. Useful for understanding data quality.",
       inputSchema: {
@@ -2565,6 +2654,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_sleep_time",
     {
+      title: "Bedtime Recommendation",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get Oura's personalized bedtime recommendations. Shows your ideal bedtime window based on your sleep patterns and circadian rhythm.",
       inputSchema: {
@@ -2643,6 +2734,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_rest_mode",
     {
+      title: "Rest Mode Periods",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get rest mode periods when you've enabled rest mode in the Oura app (typically during illness or recovery). Shows when rest mode was active and any notes.",
       inputSchema: {
@@ -2716,6 +2809,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_ring_info",
     {
+      title: "Ring Info",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get information about your Oura ring hardware including model, color, firmware version, and configuration.",
       inputSchema: {},
@@ -2782,6 +2877,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "get_personal_info",
     {
+      title: "Personal Info",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Get your Oura profile information including age, weight, height, and biological sex. This data is used by Oura to personalize insights.",
       inputSchema: {},
@@ -2832,6 +2929,8 @@ export function registerTools(server: McpServer, client: OuraClient) {
   server.registerTool(
     "analyze_temperature",
     {
+      title: "Temperature Analysis",
+      annotations: READ_ONLY_ANNOTATIONS,
       description:
         "Analyze body temperature patterns from readiness data. Temperature deviations can indicate illness, menstrual cycle phases, or environmental factors. Shows trends and flags unusual readings.",
       inputSchema: {
